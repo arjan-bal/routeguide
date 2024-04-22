@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"flag"
+	"io"
 	"log"
 	"time"
 
@@ -35,6 +36,29 @@ func printFeature(pt *pb.Point, client pb.RouteGuideClient) {
 	log.Println(prototext.Format(feature))
 }
 
+// printFeatures lists all the features within the given bounding Rectangle.
+func printFeatures(client pb.RouteGuideClient, rect *pb.Rectangle) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	stream, err := client.ListFeatures(ctx, rect)
+	if err != nil {
+		log.Fatalf("Failed to stream featrues from the server: %v", err)
+	}
+
+	for {
+		feature, err := stream.Recv()
+		if err == io.EOF {
+			log.Print("End of stream from the server!")
+			break
+		}
+		if err != nil {
+			log.Fatalf("Failed to stream features from server: %v", err)
+		}
+		log.Printf("Got feature from the server %s\n", prototext.Format(feature))
+	}
+}
+
 func main() {
 	flag.Parse()
 	var opts []grpc.DialOption
@@ -57,7 +81,13 @@ func main() {
 	defer conn.Close()
 	client := pb.NewRouteGuideClient(conn)
 	// Valid feature.
-    printFeature(&pb.Point{Latitude: 409146138, Longitude: -746188906}, client)
+	printFeature(&pb.Point{Latitude: 409146138, Longitude: -746188906}, client)
 	// Invalid feature.
 	printFeature(&pb.Point{Latitude: 0, Longitude: 0}, client)
+
+	// Looking for features between 40, -75 and 42, -73.
+	printFeatures(client, &pb.Rectangle{
+		Lo: &pb.Point{Latitude: 400000000, Longitude: -750000000},
+		Hi: &pb.Point{Latitude: 420000000, Longitude: -730000000},
+	})
 }

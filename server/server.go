@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"sync"
@@ -33,13 +34,40 @@ type routeGuideServer struct {
 
 func (s *routeGuideServer) GetFeature(ctx context.Context, pt *pb.Point) (*pb.Feature, error) {
 	for index := range s.savedFeatures {
-        feature := &s.savedFeatures[index]
+		feature := &s.savedFeatures[index]
 		if proto.Equal(feature.Location, pt) {
 			return proto.Clone(feature).(*pb.Feature), nil
 		}
 	}
 	// No feature was found, return an unnamed feature
 	return &pb.Feature{Location: pt}, nil
+}
+
+func (s *routeGuideServer) ListFeatures(rect *pb.Rectangle, stream pb.RouteGuide_ListFeaturesServer) error {
+	for i := range s.savedFeatures {
+		feature := &s.savedFeatures[i]
+		if inRange(feature.Location, rect) {
+			if err := stream.Send(feature); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func inRange(point *pb.Point, rect *pb.Rectangle) bool {
+	left := math.Min(float64(rect.Lo.Longitude), float64(rect.Hi.Longitude))
+	right := math.Max(float64(rect.Lo.Longitude), float64(rect.Hi.Longitude))
+	top := math.Max(float64(rect.Lo.Latitude), float64(rect.Hi.Latitude))
+	bottom := math.Min(float64(rect.Lo.Latitude), float64(rect.Hi.Latitude))
+
+	if float64(point.Longitude) >= left &&
+		float64(point.Longitude) <= right &&
+		float64(point.Latitude) >= bottom &&
+		float64(point.Latitude) <= top {
+		return true
+	}
+	return false
 }
 
 func newServer() *routeGuideServer {
