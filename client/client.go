@@ -25,7 +25,7 @@ var (
 
 // Quieries the server and prints the feature at the given point.
 func printFeature(pt *pb.Point, client pb.RouteGuideClient) {
-	log.Printf("Getting feature for point (%d, %d)", pt.Latitute, pt.Longitude)
+	log.Printf("Getting feature for point (%d, %d)", pt.Latitude, pt.Longitude)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	feature, err := client.GetFeature(ctx, pt)
@@ -57,7 +57,7 @@ func main() {
 	defer conn.Close()
 	client := pb.NewRouteGuideClient(conn)
 	// Valid feature.
-	printFeature(&pb.Point{Latitute: 409146138, Longitude: -746188906}, client)
+    printFeature(&pb.Point{Latitude: 409146138, Longitude: -746188906}, client)
 	// Invalid feature.
-	printFeature(&pb.Point{Latitute: 0, Longitude: 0}, client)
+	printFeature(&pb.Point{Latitude: 0, Longitude: 0}, client)
 }

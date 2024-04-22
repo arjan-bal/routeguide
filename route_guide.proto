@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package routeguide;
 
-option go_package = "arjansbal/routeguide";
+option go_package = "github.com/arjan-bal/routeguide";
 
 service RouteGuide {
     // Obtains features at a given position.
@@ -25,7 +25,7 @@ service RouteGuide {
 // Latitudes should be in the range +/- 90 degrees and longitude should be in
 // the range +/- 180 degrees (inclusive).
 message Point {
-    int32 latitute = 1;
+    int32 latitude = 1;
     int32 longitude = 2;
 }
 
