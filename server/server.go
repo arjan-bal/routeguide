@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -10,10 +11,12 @@ import (
 	"sync"
 
 	"encoding/json"
+
 	pb "github.com/arjan-bal/routeguide"
 	"github.com/arjan-bal/routeguide/data"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -25,7 +28,18 @@ type routeGuideServer struct {
 	pb.UnimplementedRouteGuideServer
 	savedFeatures []pb.Feature
 	routeNotes    map[string][]*pb.RouteNote
-	mu            sync.Mutex
+	mu            sync.Mutex // protects routeNotes
+}
+
+func (s *routeGuideServer) GetFeature(ctx context.Context, pt *pb.Point) (*pb.Feature, error) {
+	for index := range s.savedFeatures {
+        feature := &s.savedFeatures[index]
+		if proto.Equal(feature.Location, pt) {
+			return proto.Clone(feature).(*pb.Feature), nil
+		}
+	}
+	// No feature was found, return an unnamed feature
+	return &pb.Feature{Location: pt}, nil
 }
 
 func newServer() *routeGuideServer {
@@ -52,6 +66,7 @@ func main() {
 
 	var opts []grpc.ServerOption
 	if *tls {
+		log.Print("Server is using TLS")
 		certFile := data.Path("x509/server_cert.pem")
 		keyFile := data.Path("x509/server_key.pem")
 		creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
@@ -62,8 +77,8 @@ func main() {
 	}
 	grpcServer := grpc.NewServer(opts...)
 	pb.RegisterRouteGuideServer(grpcServer, newServer())
-    log.Printf("Starting to listen")
-    if err := grpcServer.Serve(lis); err != nil {
-        log.Fatalf("Server terminated due to errorr: %v", err)
-    }
+	log.Printf("Starting to listen")
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatalf("Server terminated due to errorr: %v", err)
+	}
 }
