@@ -1,4 +1,4 @@
-// Packange main implements a gRPC client that interacts with a server running
+// Package main implements a gRPC client that interacts with a server running
 // locally which hosts the route guide server.
 package main
 
@@ -24,7 +24,7 @@ var (
 	serverAddr         = flag.String("addr", "localhost:50051", "The server address in the format of host:port")
 )
 
-// Quieries the server and prints the feature at the given point.
+// Queries the server and prints the feature at the given point.
 func printFeature(pt *pb.Point, client pb.RouteGuideClient) {
 	log.Printf("Getting feature for point (%d, %d)", pt.Latitude, pt.Longitude)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -43,7 +43,7 @@ func printFeatures(client pb.RouteGuideClient, rect *pb.Rectangle) {
 
 	stream, err := client.ListFeatures(ctx, rect)
 	if err != nil {
-		log.Fatalf("Failed to stream featrues from the server: %v", err)
+		log.Fatalf("Failed to stream features from the server: %v", err)
 	}
 
 	for {
@@ -59,6 +59,38 @@ func printFeatures(client pb.RouteGuideClient, rect *pb.Rectangle) {
 	}
 }
 
+func uniraryLoggingInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	startTime := time.Now()
+	if err := invoker(ctx, method, req, reply, cc, opts...); err != nil {
+		return err
+	}
+	timeTaken := time.Now().Sub(startTime)
+	log.Printf("%s method call took time: %v", method, timeTaken)
+	return nil
+}
+
+type loggingStream struct {
+	grpc.ClientStream
+}
+
+func (s *loggingStream) RecvMsg(m any) error {
+	log.Printf("Receive a message (Type: %T) at %v", m, time.Now().Format(time.RFC3339))
+	return s.ClientStream.RecvMsg(m)
+}
+
+func (s *loggingStream) SendMsg(m any) error {
+	log.Printf("Sending a message (Type: %T) at %v", m, time.Now().Format(time.RFC3339))
+	return s.ClientStream.SendMsg(m)
+}
+
+func streamingLoggingInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	s, err := streamer(ctx, desc, cc, method, opts...)
+	if err != nil {
+		return s, err
+	}
+	return &loggingStream{s}, nil
+}
+
 func main() {
 	flag.Parse()
 	var opts []grpc.DialOption
@@ -72,6 +104,10 @@ func main() {
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
+
+	opts = append(opts,
+		grpc.WithUnaryInterceptor(uniraryLoggingInterceptor),
+		grpc.WithStreamInterceptor(streamingLoggingInterceptor))
 
 	conn, err := grpc.Dial(*serverAddr, opts...)
 	if err != nil {
