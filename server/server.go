@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"encoding/json"
 
@@ -85,6 +86,58 @@ func newServer() *routeGuideServer {
 	return s
 }
 
+type DynamicCreds struct {
+	delegate credentials.TransportCredentials
+	rwMutex  sync.RWMutex
+}
+
+func (d *DynamicCreds) ClientHandshake(ctx context.Context, host string, conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	d.rwMutex.RLock()
+	defer d.rwMutex.RUnlock()
+	return d.delegate.ClientHandshake(ctx, host, conn)
+}
+
+func (d *DynamicCreds) ServerHandshake(conn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+	d.rwMutex.RLock()
+	defer d.rwMutex.RUnlock()
+	return d.delegate.ServerHandshake(conn)
+}
+
+func (d *DynamicCreds) Info() credentials.ProtocolInfo {
+	d.rwMutex.RLock()
+	defer d.rwMutex.RUnlock()
+	return d.delegate.Info()
+}
+
+func (d *DynamicCreds) Clone() credentials.TransportCredentials {
+	d.rwMutex.RLock()
+	defer d.rwMutex.RUnlock()
+	return NewDynamicCreds(d.delegate.Clone())
+}
+
+func (d *DynamicCreds) OverrideServerName(name string) error {
+	d.rwMutex.RLock()
+	defer d.rwMutex.RUnlock()
+	return d.delegate.OverrideServerName(name)
+}
+
+func (d *DynamicCreds) UpdateDelegate(newCreds credentials.TransportCredentials) {
+	d.rwMutex.Lock()
+	defer d.rwMutex.Unlock()
+	if newCreds == d {
+		fmt.Printf("Can't point to self!")
+		return
+	}
+	d.delegate = newCreds
+}
+
+func NewDynamicCreds(delegate credentials.TransportCredentials) *DynamicCreds {
+	return &DynamicCreds{
+		delegate: delegate,
+		rwMutex:  sync.RWMutex{},
+	}
+}
+
 func main() {
 	flag.Parse()
 	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", *port))
@@ -95,18 +148,44 @@ func main() {
 	var opts []grpc.ServerOption
 	if *tls {
 		log.Print("Server is using TLS")
-		certFile := data.Path("x509/server_cert.pem")
-		keyFile := data.Path("x509/server_key.pem")
-		creds, err := credentials.NewServerTLSFromFile(certFile, keyFile)
+		serverCertFile := data.Path("x509/server_cert.pem")
+		serverKeyFile := data.Path("x509/server_key.pem")
+		serverCreds, err := credentials.NewServerTLSFromFile(serverCertFile, serverKeyFile)
 		if err != nil {
 			log.Fatalf("Failed to generate credentials: %v", err)
 		}
-		opts = []grpc.ServerOption{grpc.Creds(creds)}
+		clientCertFile := data.Path("x509/client_cert.pem")
+		clientKeyFile := data.Path("x509/client_key.pem")
+		clientCreds, err := credentials.NewServerTLSFromFile(clientCertFile, clientKeyFile)
+		if err != nil {
+			log.Fatalf("Failed to generate credentials: %v", err)
+		}
+		dynCreds := NewDynamicCreds(serverCreds)
+		opts = []grpc.ServerOption{grpc.Creds(dynCreds)}
+		ticker := time.NewTicker(5 * time.Second)
+		go func() {
+			useClientCert := true
+			for {
+				select {
+				case <-ticker.C:
+					var newCreds credentials.TransportCredentials
+					if useClientCert {
+						newCreds = clientCreds
+						fmt.Println("Using client creds")
+					} else {
+						newCreds = serverCreds
+						fmt.Println("Using server creds")
+					}
+					dynCreds.UpdateDelegate(newCreds)
+					useClientCert = !useClientCert
+				}
+			}
+		}()
 	}
 	grpcServer := grpc.NewServer(opts...)
 	pb.RegisterRouteGuideServer(grpcServer, newServer())
 	log.Printf("Starting to listen")
 	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("Server terminated due to errorr: %v", err)
+		log.Fatalf("Server terminated due to error: %v", err)
 	}
 }
